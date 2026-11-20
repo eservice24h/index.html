@@ -1,0 +1,881 @@
+<!DOCTYPE html>
+<html lang="bn">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Tech &amp; Print Hub - Customer Receipt Slip Generator</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.5.13/cropper.min.css" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.5.13/cropper.min.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Hind+Siliguri:wght@500;600;700&family=Poppins:wght@500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    body { font-family: 'Hind Siliguri', 'Poppins', sans-serif; background: #e2e8f0; margin: 0; overflow-x: hidden; }
+    .maroon-bg { background: linear-gradient(180deg, #6e001b 0%, #4b0012 100%); }
+    #customer-slip-canvas {
+      width: 680px;
+      background: #ffffff;
+      color: #0f172a;
+      padding: 32px 34px;
+      box-sizing: border-box;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      border: 4px solid #5e0017;
+      box-shadow: 0 12px 30px rgba(0, 0, 0, 0.14);
+    }
+    .slip-field-box {
+      border: 2.5px solid #5e0017;
+      border-radius: 16px;
+      padding: 11px 18px;
+      background: #fffafa;
+      margin-bottom: 11px;
+    }
+    @media (min-width: 1024px) {
+      .desktop-single-screen { height: calc(100dvh - 68px); overflow: hidden; }
+      .desktop-panel-fit { height: 100%; overflow: hidden; }
+    }
+  </style>
+</head>
+<body class="min-h-screen lg:h-dvh lg:overflow-hidden text-slate-800 flex flex-col">
+
+  <!-- Top Bar -->
+  <header class="bg-white border-b border-slate-200 sticky top-0 z-30 shadow-sm shrink-0">
+    <div class="max-w-[1600px] mx-auto px-3 py-2 flex flex-wrap items-center justify-between gap-2">
+      <div class="flex items-center gap-2">
+        <div class="w-8 h-8 rounded-lg maroon-bg text-white flex items-center justify-center font-bold text-base">TPH</div>
+        <div>
+          <h1 class="font-bold text-slate-900 text-sm sm:text-base leading-tight">কাস্টমার রিসিট স্লিপ জেনারেটর</h1>
+          <p class="text-[11px] text-slate-500 hidden sm:block">Tech &amp; Print Hub &bull; Cross-Device Serial Sync</p>
+        </div>
+      </div>
+      <div class="flex items-center gap-1.5 flex-wrap text-xs font-semibold text-white">
+        <button type="button" onclick="resetCurrentForm()" class="bg-slate-600 hover:bg-slate-700 px-2.5 py-1.5 rounded-lg shadow cursor-pointer">রিসেট</button>
+        <button type="button" onclick="startNewEntry(true)" class="bg-teal-600 hover:bg-teal-700 px-2.5 py-1.5 rounded-lg shadow cursor-pointer">+ নতুন এন্ট্রি</button>
+        <button type="button" onclick="toggleModal('adminSearchModal')" class="bg-amber-600 hover:bg-amber-700 px-2.5 py-1.5 rounded-lg shadow cursor-pointer">অনুসন্ধান</button>
+        <button type="button" onclick="toggleModal('statusUpdateModal')" class="bg-blue-600 hover:bg-blue-700 px-2.5 py-1.5 rounded-lg shadow cursor-pointer">স্ট্যাটাস</button>
+        <button type="button" id="saveBtn" onclick="saveToGoogleSheet()" class="bg-indigo-600 hover:bg-indigo-700 px-3 py-1.5 rounded-lg shadow cursor-pointer">সংরক্ষণ (Sheet)</button>
+        <button type="button" id="downloadSlipBtn" onclick="downloadCustomerSlip()" class="bg-rose-800 hover:bg-rose-900 px-3 py-1.5 rounded-lg shadow cursor-pointer">স্লিপ PNG</button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Workspace -->
+  <main class="max-w-[1600px] w-full mx-auto px-3 py-2 grid grid-cols-1 lg:grid-cols-12 gap-3.5 items-stretch flex-grow desktop-single-screen">
+
+    <!-- Left Editor Panel -->
+    <section class="lg:col-span-7 bg-white rounded-2xl shadow-sm border border-slate-200 p-3 lg:p-3.5 flex flex-col justify-between desktop-panel-fit">
+      <div class="space-y-2">
+        <div class="flex items-center justify-between border-b pb-1.5">
+          <h2 class="font-bold text-sm lg:text-base text-slate-800">📝 স্লিপের তথ্য পরিবর্তন করুন</h2>
+          <span id="syncStatusBadge" class="text-[11px] font-semibold text-amber-600">🔄 শিট থেকে সিরিয়াল সিঙ্ক হচ্ছে...</span>
+        </div>
+
+        <div id="formIncompleteBanner" class="hidden rounded-lg border border-rose-300 bg-rose-50 px-3 py-1.5 text-rose-800 text-xs font-bold flex items-center justify-between gap-2">
+          <span>⚠️ অনুগ্রহ করে সম্পূর্ণ তথ্য ফিলাপ করুন!</span>
+          <span id="missingFieldsList" class="text-[11px] font-semibold text-rose-700 truncate max-w-[55%]"></span>
+        </div>
+
+        <!-- Customer Photo -->
+        <div class="bg-slate-50 border border-slate-200 rounded-xl p-2 flex items-center justify-between gap-3">
+          <div class="flex items-center gap-2.5">
+            <div class="w-9 h-11 border border-slate-300 rounded overflow-hidden bg-slate-100 shrink-0">
+              <img id="editorPhotoPreview" alt="Preview" class="w-full h-full object-cover object-top">
+            </div>
+            <div>
+              <div class="text-xs font-bold text-slate-700">গ্রাহকের ছবি (ঐচ্ছিক)</div>
+              <div class="text-[10px] text-slate-500">ক্রপ করে আপলোড করলে স্লিপে যুক্ত হবে</div>
+            </div>
+          </div>
+          <div class="flex items-center gap-2">
+            <label class="cursor-pointer border border-dashed border-slate-300 hover:border-rose-800 rounded-lg py-1.5 px-3 bg-white text-[11px] font-semibold text-rose-900">
+              📁 ক্রপ ও আপলোড
+              <input type="file" id="photoInput" accept="image/*" class="hidden" onchange="initCropperModal(event)">
+            </label>
+            <button type="button" onclick="resetPhoto()" class="px-2.5 py-1.5 text-[11px] font-bold bg-slate-200 hover:bg-slate-300 rounded-lg text-slate-700">মুছুন</button>
+          </div>
+        </div>
+
+        <!-- Serial & Date -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+          <div>
+            <label class="block text-[11px] font-bold text-slate-700 mb-0.5">SERIAL NUMBER (সকল ডিভাইসে সিঙ্ক)</label>
+            <input type="text" id="serialNoInput" readonly tabindex="-1" class="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 bg-slate-100 font-bold text-xs text-rose-900 font-mono">
+          </div>
+          <div>
+            <label class="block text-[11px] font-bold text-slate-700 mb-0.5">এন্ট্রি / জমার তারিখ</label>
+            <input type="date" id="submissionDateInput" oninput="handleFormFieldChange()" onchange="handleFormFieldChange()" class="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 font-semibold text-xs bg-white">
+          </div>
+        </div>
+
+        <!-- Name & Mobile -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+          <div>
+            <label class="block text-[11px] font-bold text-slate-700 mb-0.5">NAME (নাম)</label>
+            <input type="text" id="nameInput" placeholder="গ্রাহকের নাম লিখুন..." oninput="handleFormFieldChange()" class="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 font-semibold text-xs">
+          </div>
+          <div>
+            <label class="block text-[11px] font-bold text-slate-700 mb-0.5">MOBILE NUMBER (মোবাইল নম্বর)</label>
+            <input type="text" id="mobileInput" placeholder="মোবাইল নম্বর লিখুন..." oninput="handleFormFieldChange()" class="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 font-semibold text-xs font-mono">
+          </div>
+        </div>
+
+        <!-- Email & Status -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+          <div>
+            <label class="block text-[11px] font-bold text-slate-700 mb-0.5">CUSTOMER EMAIL (ইমেইল)</label>
+            <input type="email" id="customerEmailInput" placeholder="example@gmail.com" oninput="handleFormFieldChange()" class="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 font-semibold text-xs font-mono">
+          </div>
+          <div>
+            <label class="block text-[11px] font-bold text-slate-700 mb-0.5">STATUS (স্ট্যাটাস)</label>
+            <select id="statusSelect" onchange="handleFormFieldChange()" class="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 font-semibold text-xs bg-white">
+              <option value="সম্পূর্ণ ✅" selected>সম্পূর্ণ ✅ (Completed)</option>
+              <option value="যাচাইকরণ ⏳">যাচাইকরণ ⏳ (Verification)</option>
+              <option value="প্রক্রিয়াধীন ⚡">প্রক্রিয়াধীন ⚡ (In Progress)</option>
+              <option value="যাচাইবাছাই চলছে 🔍">যাচাইবাছাই চলছে 🔍 (Under Review)</option>
+              <option value="অপেক্ষমাণ ⚠️">অপেক্ষমাণ ⚠️ (Waiting)</option>
+              <option value="ডেলিভারি 📦">ডেলিভারি 📦 (Delivery)</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Service Category & Sub-Service -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+          <div>
+            <label class="block text-[11px] font-bold text-slate-700 mb-0.5">SERVICE বিভাগ</label>
+            <select id="mainCategorySelect" onchange="handleMainCategoryChange()" class="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 font-semibold text-xs bg-white">
+              <option value="NID" selected>এনআইডি সেবা (NID Services)</option>
+              <option value="PASSPORT">পাসপোর্ট সেবা (Passport Services)</option>
+              <option value="BIRTH">জন্ম ও মৃত্যু নিবন্ধন (Birth/Death)</option>
+              <option value="TAX">টিন সার্টিফিকেট ও ট্যাক্স (TIN &amp; Tax)</option>
+              <option value="PLASTIC_CARD">প্লাস্টিক কার্ড</option>
+              <option value="CUSTOM">অন্যান্য (Custom Service)</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-[11px] font-bold text-slate-700 mb-0.5">নির্দিষ্ট সেবা</label>
+            <div id="subCategoryContainer">
+              <select id="subCategorySelect" onchange="handleSubCategoryChange()" class="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 font-semibold text-xs bg-white"></select>
+            </div>
+          </div>
+        </div>
+
+        <!-- ID Type & ID Number -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+          <div>
+            <label class="block text-[11px] font-bold text-slate-700 mb-0.5">আইডি ক্যাটাগরি</label>
+            <select id="idTypeSelect" onchange="handleIdTypeChange()" class="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 font-semibold text-xs bg-white">
+              <option value="National Id Card (Smart)" selected>National Id Card (Smart)</option>
+              <option value="National Id Card (Old)">National Id Card (Old)</option>
+              <option value="Birth Registration No">Birth Registration No</option>
+              <option value="NID From">NID From</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-[11px] font-bold text-slate-700 mb-0.5">আইডি নম্বর</label>
+            <input type="text" id="idValueInput" placeholder="সর্বোচ্চ ১০ ডিজিট লিখুন..." onkeydown="handleIdKeyDown(event)" onclick="protectNidfnCursor()" oninput="handleIdValueInput()" class="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 font-semibold text-xs font-mono">
+          </div>
+        </div>
+        <p id="idRuleHint" class="text-[10px] text-slate-500 -mt-1 font-medium">নিয়ম: Smart NID সর্বোচ্চ ১০ ডিজিট।</p>
+
+        <!-- Date of Birth -->
+        <div>
+          <label class="block text-[11px] font-bold text-slate-700 mb-0.5">DATE OF BIRTH (জন্ম তারিখ)</label>
+          <div class="grid grid-cols-3 gap-2">
+            <select id="dobDay" onchange="handleFormFieldChange()" class="px-2 py-1.5 rounded-lg border border-slate-300 font-semibold text-xs bg-white"><option value="" disabled selected>Day</option></select>
+            <select id="dobMonth" onchange="handleFormFieldChange()" class="px-2 py-1.5 rounded-lg border border-slate-300 font-semibold text-xs bg-white">
+              <option value="" disabled selected>Month</option>
+              <option>January</option><option>February</option><option>March</option><option>April</option>
+              <option>May</option><option>June</option><option>July</option><option>August</option>
+              <option>September</option><option>October</option><option>November</option><option>December</option>
+            </select>
+            <select id="dobYear" onchange="handleFormFieldChange()" class="px-2 py-1.5 rounded-lg border border-slate-300 font-semibold text-xs bg-white"><option value="" disabled selected>Year</option></select>
+          </div>
+        </div>
+      </div>
+
+      <!-- Helpline Settings -->
+      <details class="border border-slate-200 rounded-xl px-3 py-1.5 bg-slate-50 text-xs mt-2">
+        <summary class="font-bold text-slate-700 cursor-pointer text-[11px]">⚙️ হেল্পলাইন তথ্য পরিবর্তন</summary>
+        <div class="mt-2 grid grid-cols-1 sm:grid-cols-3 gap-2">
+          <input type="text" id="telInput" value="+8809638457046" oninput="updateCard()" class="px-2 py-1 rounded-lg border border-slate-300 text-xs">
+          <input type="text" id="waInput" value="+8801781230028" oninput="updateCard()" class="px-2 py-1 rounded-lg border border-slate-300 text-xs">
+          <input type="text" id="emailInput" value="techprinthub2022@gmail.com" oninput="updateCard()" class="px-2 py-1 rounded-lg border border-slate-300 text-xs">
+        </div>
+      </details>
+    </section>
+
+    <!-- Right Live Preview: Customer Receipt Slip -->
+    <section class="lg:col-span-5 flex flex-col justify-between desktop-panel-fit bg-slate-200/80 rounded-2xl border border-slate-300 p-2.5">
+      <div class="w-full flex items-center justify-between mb-1.5 px-1 shrink-0">
+        <span class="text-[11px] font-bold text-slate-700 uppercase tracking-wider">লাইভ প্রিভিউ (Customer Slip)</span>
+        <span class="text-[11px] text-slate-500">PNG ডাউনলোডের জন্য প্রস্তুত</span>
+      </div>
+
+      <div id="preview-wrapper" class="bg-slate-300/90 p-2 rounded-xl border border-slate-400 shadow-inner w-full flex justify-center items-start flex-grow overflow-hidden">
+        <div id="scale-container" style="transform-origin: top center; width: 680px;">
+
+          <!-- CUSTOMER RECEIPT SLIP -->
+          <div id="customer-slip-canvas">
+            <div>
+              <div class="text-center border-b-4 border-[#5e0017] pb-3 mb-3.5">
+                <div class="maroon-bg text-white inline-block px-7 py-1.5 rounded-full font-bold text-2xl mb-1.5" style="font-family: 'Poppins', sans-serif;">Tech &amp; Print Hub</div>
+                <div class="text-2xl font-extrabold text-[#5e0017] uppercase" style="font-family: 'Poppins', sans-serif;">CUSTOMER RECEIPT SLIP</div>
+                <div class="text-sm font-bold text-slate-600 mt-0.5">কাস্টমার রিসিট স্লিপ (গ্রাহক কপি)</div>
+              </div>
+
+              <!-- Photo & Status Side-by-Side Header -->
+              <div class="flex items-center justify-between gap-4 mb-3.5 bg-[#fffafa] border-2 border-[#5e0017] rounded-2xl p-3">
+                <div class="w-[125px] h-[155px] border-[3px] border-[#5e0017] rounded-xl bg-white p-1 shrink-0">
+                  <img id="slipPhoto" alt="Slip Photo" class="w-full h-full object-cover object-top rounded-lg bg-slate-100">
+                </div>
+                <div class="flex-1 space-y-3">
+                  <div>
+                    <div class="text-xs font-bold text-[#5e0017] uppercase">SERIAL NUMBER (সিরিয়াল)</div>
+                    <div id="slipTopSerial" class="text-xl font-extrabold text-slate-900 font-mono mt-0.5">GS-Status-2420</div>
+                  </div>
+                  <div>
+                    <div class="text-xs font-bold text-[#5e0017] uppercase leading-normal">STATUS (কাজের অবস্থা)</div>
+                    <div id="slipStatus" class="block w-fit mt-2 px-3.5 py-1 rounded-lg bg-emerald-100 border border-emerald-400 text-emerald-950 text-lg font-bold leading-normal">সম্পূর্ণ ✅</div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="slip-field-box">
+                <div class="text-sm font-bold text-[#5e0017]">এন্ট্রি / জমার তারিখ (ENTRY DATE)</div>
+                <div id="slipDate" class="text-xl font-bold mt-0.5" style="font-family: 'Poppins', sans-serif;">—</div>
+              </div>
+
+              <div class="slip-field-box">
+                <div class="text-sm font-bold text-[#5e0017]">নাম (NAME)</div>
+                <div id="slipName" class="text-2xl font-bold mt-0.5">—</div>
+              </div>
+
+              <div class="slip-field-box">
+                <div class="text-sm font-bold text-[#5e0017]">সেবা (SERVICE)</div>
+                <div id="slipService" class="text-xl font-bold mt-0.5">—</div>
+              </div>
+
+              <div class="slip-field-box">
+                <div id="slipIdLabel" class="text-sm font-bold text-[#5e0017]">NATIONAL ID CARD (SMART) (ভোটার আইডি / নম্বর)</div>
+                <div id="slipIdValue" class="text-xl font-bold mt-0.5 font-mono">—</div>
+              </div>
+
+              <div class="slip-field-box">
+                <div class="text-sm font-bold text-[#5e0017]">জন্ম তারিখ (DATE OF BIRTH)</div>
+                <div id="slipDob" class="text-xl font-bold mt-0.5" style="font-family: 'Poppins', sans-serif;">—</div>
+              </div>
+
+              <!-- Readymade Barcode Box -->
+              <div class="slip-field-box text-center py-2.5 mb-0">
+                <div class="text-sm font-bold text-[#5e0017] mb-1">BARCODE (বারকোড)</div>
+                <div class="flex flex-col items-center justify-center bg-white py-2 px-3 rounded-xl border border-slate-200">
+                  <img id="slipBarcodeImg" alt="Readymade Barcode" style="width: 420px; height: 76px; max-width: 100%; display: block;" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='420' height='80' viewBox='0 0 420 80'%3E%3Crect width='420' height='80' fill='%23ffffff'/%3E%3Cg fill='%230f172a'%3E%3Crect x='20' y='10' width='4' height='60'/%3E%3Crect x='28' y='10' width='2' height='60'/%3E%3Crect x='35' y='10' width='6' height='60'/%3E%3Crect x='46' y='10' width='2' height='60'/%3E%3Crect x='52' y='10' width='5' height='60'/%3E%3Crect x='62' y='10' width='3' height='60'/%3E%3Crect x='70' y='10' width='7' height='60'/%3E%3Crect x='82' y='10' width='2' height='60'/%3E%3Crect x='89' y='10' width='4' height='60'/%3E%3Crect x='98' y='10' width='6' height='60'/%3E%3Crect x='109' y='10' width='2' height='60'/%3E%3Crect x='116' y='10' width='5' height='60'/%3E%3Crect x='126' y='10' width='3' height='60'/%3E%3Crect x='134' y='10' width='6' height='60'/%3E%3Crect x='145' y='10' width='2' height='60'/%3E%3Crect x='152' y='10' width='4' height='60'/%3E%3Crect x='161' y='10' width='7' height='60'/%3E%3Crect x='173' y='10' width='2' height='60'/%3E%3Crect x='180' y='10' width='5' height='60'/%3E%3Crect x='190' y='10' width='3' height='60'/%3E%3Crect x='198' y='10' width='6' height='60'/%3E%3Crect x='209' y='10' width='2' height='60'/%3E%3Crect x='216' y='10' width='4' height='60'/%3E%3Crect x='225' y='10' width='6' height='60'/%3E%3Crect x='236' y='10' width='2' height='60'/%3E%3Crect x='243' y='10' width='5' height='60'/%3E%3Crect x='253' y='10' width='3' height='60'/%3E%3Crect x='261' y='10' width='7' height='60'/%3E%3Crect x='273' y='10' width='2' height='60'/%3E%3Crect x='280' y='10' width='4' height='60'/%3E%3Crect x='289' y='10' width='6' height='60'/%3E%3Crect x='300' y='10' width='2' height='60'/%3E%3Crect x='307' y='10' width='5' height='60'/%3E%3Crect x='317' y='10' width='3' height='60'/%3E%3Crect x='325' y='10' width='6' height='60'/%3E%3Crect x='336' y='10' width='2' height='60'/%3E%3Crect x='343' y='10' width='4' height='60'/%3E%3Crect x='352' y='10' width='7' height='60'/%3E%3Crect x='364' y='10' width='2' height='60'/%3E%3Crect x='371' y='10' width='5' height='60'/%3E%3Crect x='381' y='10' width='3' height='60'/%3E%3Crect x='389' y='10' width='4' height='60'/%3E%3Crect x='397' y='10' width='2' height='60'/%3E%3C/g%3E%3C/svg%3E">
+                  <span id="slipSerialLabel" class="text-xs font-bold text-slate-700 mt-1 font-mono tracking-wider">GS-Status-2420</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="border-t-2 border-dashed border-slate-400 pt-2.5 text-center text-slate-700 mt-3" style="font-family: 'Poppins', sans-serif;">
+              <div class="text-base font-bold text-[#5e0017]">📞 <span id="slipTel">+8809638457046</span> &nbsp;|&nbsp; 💬 <span id="slipWa">+8801781230028</span></div>
+              <div class="text-sm font-semibold mt-1">✉️ <span id="slipEmail">techprinthub2022@gmail.com</span></div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- Modals -->
+  <div id="adminSearchModal" class="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 hidden">
+    <div class="bg-white rounded-2xl max-w-xl w-full p-6 shadow-2xl flex flex-col gap-3">
+      <div class="flex items-center justify-between border-b pb-2">
+        <h3 class="font-bold text-base">🔍 তথ্য অনুসন্ধান</h3>
+        <button type="button" onclick="toggleModal('adminSearchModal')" class="text-xl font-bold">&times;</button>
+      </div>
+      <input type="text" id="searchNidInput" placeholder="এনআইডি নম্বর..." class="px-3 py-2 rounded-xl border text-xs font-mono">
+      <input type="text" id="searchMobileInput" placeholder="মোবাইল নম্বর..." class="px-3 py-2 rounded-xl border text-xs font-mono">
+      <input type="text" id="searchEmailInput" placeholder="ইমেইল..." class="px-3 py-2 rounded-xl border text-xs font-mono">
+      <button type="button" onclick="performGeneralSearch()" class="bg-amber-600 hover:bg-amber-700 text-white font-semibold py-2 rounded-xl text-xs">অনুসন্ধান করুন</button>
+      <div id="generalSearchResult" class="bg-slate-50 border rounded-xl p-3 text-xs max-h-60 overflow-y-auto">ফলাফল এখানে প্রদর্শিত হবে...</div>
+    </div>
+  </div>
+
+  <div id="statusUpdateModal" class="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 hidden">
+    <div class="bg-white rounded-2xl max-w-xl w-full p-6 shadow-2xl flex flex-col gap-3">
+      <div class="flex items-center justify-between border-b pb-2">
+        <h3 class="font-bold text-base">⚙️ স্ট্যাটাস পরিবর্তন (GS-Status)</h3>
+        <button type="button" onclick="toggleModal('statusUpdateModal')" class="text-xl font-bold">&times;</button>
+      </div>
+      <div class="flex items-center border rounded-xl px-3 py-2">
+        <span class="font-bold text-rose-900 font-mono text-sm">GS-Status-</span>
+        <input type="text" id="statusNumInput" placeholder="যেমন: 2420" class="w-full pl-1 text-sm font-mono font-bold focus:outline-none">
+      </div>
+      <button type="button" onclick="performGsStatusSearch()" class="bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 rounded-xl text-xs">আবেদন খুঁজুন</button>
+      <div id="statusSearchResult" class="bg-slate-50 border rounded-xl p-3 text-xs max-h-60 overflow-y-auto">ফলাফল এখানে প্রদর্শিত হবে...</div>
+    </div>
+  </div>
+
+  <div id="cropperModal" class="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 hidden">
+    <div class="bg-white rounded-2xl max-w-lg w-full p-5 shadow-2xl flex flex-col gap-3">
+      <h3 class="font-bold text-base border-b pb-2">✂️ ছবি ক্রপ করুন</h3>
+      <div class="w-full h-80 bg-slate-900 rounded-xl overflow-hidden flex items-center justify-center">
+        <img id="imageToCrop" src="" alt="Source" class="max-w-full">
+      </div>
+      <div class="flex justify-end gap-2">
+        <button type="button" onclick="closeCropperModal()" class="px-4 py-2 text-xs bg-slate-100 rounded-xl">বাতিল</button>
+        <button type="button" onclick="getCroppedImage()" class="px-5 py-2 text-xs font-bold bg-rose-800 text-white rounded-xl">ক্রপ করুন</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toastNotification" class="fixed bottom-6 right-6 z-50 bg-emerald-600 text-white px-5 py-3 rounded-2xl shadow-xl flex items-center gap-2 transform translate-y-32 opacity-0 transition-all duration-300 font-semibold text-sm">
+    <span>✅</span><span id="toastMessage">সফলভাবে সম্পন্ন হয়েছে!</span>
+  </div>
+
+  <script>
+    const GOOGLE_SHEET_URL = "https://script.google.com/macros/s/AKfycbzX-W-4uU-_u6wCBfaqzgTKNlgmRytvrh-zHhIA-XkGeYaVYEYah-v6vddPnWeqiVCm/exec";
+    const defaultAvatar = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='400' height='500' viewBox='0 0 400 500'%3E%3Crect width='400' height='500' fill='%23e2e8f0'/%3E%3Ccircle cx='200' cy='180' r='80' fill='%2394a3b8'/%3E%3Cpath d='M60 460 C60 350 340 350 340 460 Z' fill='%2394a3b8'/%3E%3Ctext x='200' y='480' font-family='sans-serif' font-size='24' fill='%23475569' text-anchor='middle'%3E%E0%A6%97%E0%A7%8D%E0%A6%B0%E0%A6%BE%E0%A6%B9%E0%A6%95%E0%A7%87%E0%A6%B0%20%E0%A6%9B%E0%A6%AC%E0%A6%BF%3C/text%3E%3C/svg%3E";
+
+    const READYMADE_BARCODE_SRC = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='420' height='80' viewBox='0 0 420 80'%3E%3Crect width='420' height='80' fill='%23ffffff'/%3E%3Cg fill='%230f172a'%3E%3Crect x='20' y='10' width='4' height='60'/%3E%3Crect x='28' y='10' width='2' height='60'/%3E%3Crect x='35' y='10' width='6' height='60'/%3E%3Crect x='46' y='10' width='2' height='60'/%3E%3Crect x='52' y='10' width='5' height='60'/%3E%3Crect x='62' y='10' width='3' height='60'/%3E%3Crect x='70' y='10' width='7' height='60'/%3E%3Crect x='82' y='10' width='2' height='60'/%3E%3Crect x='89' y='10' width='4' height='60'/%3E%3Crect x='98' y='10' width='6' height='60'/%3E%3Crect x='109' y='10' width='2' height='60'/%3E%3Crect x='116' y='10' width='5' height='60'/%3E%3Crect x='126' y='10' width='3' height='60'/%3E%3Crect x='134' y='10' width='6' height='60'/%3E%3Crect x='145' y='10' width='2' height='60'/%3E%3Crect x='152' y='10' width='4' height='60'/%3E%3Crect x='161' y='10' width='7' height='60'/%3E%3Crect x='173' y='10' width='2' height='60'/%3E%3Crect x='180' y='10' width='5' height='60'/%3E%3Crect x='190' y='10' width='3' height='60'/%3E%3Crect x='198' y='10' width='6' height='60'/%3E%3Crect x='209' y='10' width='2' height='60'/%3E%3Crect x='216' y='10' width='4' height='60'/%3E%3Crect x='225' y='10' width='6' height='60'/%3E%3Crect x='236' y='10' width='2' height='60'/%3E%3Crect x='243' y='10' width='5' height='60'/%3E%3Crect x='253' y='10' width='3' height='60'/%3E%3Crect x='261' y='10' width='7' height='60'/%3E%3Crect x='273' y='10' width='2' height='60'/%3E%3Crect x='280' y='10' width='4' height='60'/%3E%3Crect x='289' y='10' width='6' height='60'/%3E%3Crect x='300' y='10' width='2' height='60'/%3E%3Crect x='307' y='10' width='5' height='60'/%3E%3Crect x='317' y='10' width='3' height='60'/%3E%3Crect x='325' y='10' width='6' height='60'/%3E%3Crect x='336' y='10' width='2' height='60'/%3E%3Crect x='343' y='10' width='4' height='60'/%3E%3Crect x='352' y='10' width='7' height='60'/%3E%3Crect x='364' y='10' width='2' height='60'/%3E%3Crect x='371' y='10' width='5' height='60'/%3E%3Crect x='381' y='10' width='3' height='60'/%3E%3Crect x='389' y='10' width='4' height='60'/%3E%3Crect x='397' y='10' width='2' height='60'/%3E%3C/g%3E%3C/svg%3E";
+
+    const STATUS_OPTIONS = [
+      "সম্পূর্ণ ✅",
+      "যাচাইকরণ ⏳",
+      "প্রক্রিয়াধীন ⚡",
+      "যাচাইবাছাই চলছে 🔍",
+      "অপেক্ষমাণ ⚠️",
+      "ডেলিভারি 📦"
+    ];
+
+    const NIDFN_PREFIX = "NIDFN";
+    const serviceData = {
+      "NID": ["নতুন ভোটার আবেদন", "জাতীয় পরিচয়পত্র সংশোধন", "ভোটার এলাকা স্থানান্তর", "হারিয়ে যাওয়া এনআইডি রি-ইস্যু"],
+      "PASSPORT": ["নতুন ই-পাসপোর্ট আবেদন", "পাসপোর্ট রি-ইস্যু ও নবায়ন", "পাসপোর্ট সংশোধন", "পুলিশ ভেরিফিকেশন"],
+      "BIRTH": ["নতুন জন্ম নিবন্ধন আবেদন", "জন্ম নিবন্ধন সংশোধন", "জন্ম সনদ অনলাইন তথ্য সংযোজন"],
+      "TAX": ["নতুন ই-টিন সার্টিফিকেট (TIN)", "রিটার্ন সাবমিশন ও সার্টিফিকেট", "ভ্যাট সার্টিফিকেট আবেদন"]
+    };
+    let cropper = null, recordStore = {}, hasInteractedWithForm = false;
+
+    const showToast = (msg, isError = false) => {
+      const t = document.getElementById('toastNotification');
+      t.className = `fixed bottom-6 right-6 z-50 ${isError ? 'bg-rose-600' : 'bg-emerald-600'} text-white px-5 py-3 rounded-2xl shadow-xl flex items-center gap-2 transition-all duration-300 font-semibold text-sm`;
+      t.firstElementChild.textContent = isError ? '⚠️' : '✅';
+      document.getElementById('toastMessage').textContent = msg;
+      setTimeout(() => t.classList.add('translate-y-32', 'opacity-0'), 3200);
+    };
+
+    const toggleModal = (id) => document.getElementById(id).classList.toggle('hidden');
+
+    const setCustomerPhoto = (src) => {
+      const imgSrc = src || defaultAvatar;
+      ['editorPhotoPreview', 'slipPhoto'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.src = imgSrc;
+      });
+    };
+
+    const applyReadymadeBarcode = (serialText) => {
+      const imgEl = document.getElementById('slipBarcodeImg');
+      const lblEl = document.getElementById('slipSerialLabel');
+      if (imgEl && !imgEl.src) imgEl.src = READYMADE_BARCODE_SRC;
+      if (lblEl) lblEl.textContent = serialText;
+    };
+
+    const getServiceValue = () => {
+      const cat = document.getElementById('mainCategorySelect').value;
+      if (cat === "PLASTIC_CARD") return 'প্লাস্টিক কার্ড';
+      if (cat === "CUSTOM") return document.getElementById('subCategoryInput')?.value.trim() || '';
+      return document.getElementById('subCategorySelect')?.value.trim() || '';
+    };
+
+    const setServiceFieldsFromRecord = (rec) => {
+      const targetService = (rec.service || '').trim();
+      const catSel = document.getElementById('mainCategorySelect');
+      let matchedCat = null;
+
+      if (targetService === 'প্লাস্টিক কার্ড') {
+        matchedCat = 'PLASTIC_CARD';
+      } else {
+        for (const [catKey, items] of Object.entries(serviceData)) {
+          if (items.includes(targetService)) {
+            matchedCat = catKey;
+            break;
+          }
+        }
+      }
+
+      if (matchedCat) {
+        catSel.value = matchedCat;
+        handleMainCategoryChange();
+        if (matchedCat !== 'PLASTIC_CARD') {
+          const subSel = document.getElementById('subCategorySelect');
+          if (subSel) subSel.value = targetService;
+        }
+      } else if (targetService) {
+        catSel.value = 'CUSTOM';
+        handleMainCategoryChange();
+        const subInp = document.getElementById('subCategoryInput');
+        if (subInp) subInp.value = targetService;
+      }
+    };
+
+    const getMissingRequiredFields = () => {
+      const m = [];
+      if (!document.getElementById('nameInput').value.trim()) m.push("নাম");
+      if (!document.getElementById('submissionDateInput').value.trim()) m.push("এন্ট্রি তারিখ");
+      if (!document.getElementById('mobileInput').value.trim()) m.push("মোবাইল নম্বর");
+      if (!document.getElementById('customerEmailInput').value.trim()) m.push("গ্রাহকের ইমেইল");
+      if (!getServiceValue()) m.push("সেবা");
+      const type = document.getElementById('idTypeSelect').value;
+      const rawId = document.getElementById('idValueInput').value.trim();
+      const idVal = type === "NID From" ? rawId.replace(/^NIDFN/i, '').trim() : rawId;
+      if (!idVal) m.push("আইডি নম্বর");
+      if (!document.getElementById('dobDay').value || !document.getElementById('dobMonth').value || !document.getElementById('dobYear').value) m.push("জন্ম তারিখ");
+      return m;
+    };
+
+    const refreshFormNotification = (force = false) => {
+      const banner = document.getElementById('formIncompleteBanner');
+      const missing = getMissingRequiredFields();
+      if (missing.length && (hasInteractedWithForm || force)) {
+        banner.classList.remove('hidden');
+        document.getElementById('missingFieldsList').textContent = `বাকি: ${missing.join(", ")}`;
+      } else {
+        banner.classList.add('hidden');
+      }
+      return missing;
+    };
+
+    const validateRequiredFields = (showAlert = true) => {
+      hasInteractedWithForm = true;
+      const missing = refreshFormNotification(true);
+      if (missing.length && showAlert) showToast("অনুগ্রহ করে সম্পূর্ণ তথ্য ফিলাপ করুন!", true);
+      return !missing.length;
+    };
+
+    const handleFormFieldChange = () => { hasInteractedWithForm = true; updateCard(); refreshFormNotification(); };
+
+    const formatEntryDate = (raw) => {
+      if (raw) {
+        const [y, m, d] = raw.split('-').map(Number);
+        const dt = new Date(y, m - 1, d);
+        if (!isNaN(dt)) return dt.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+      }
+      return new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+    };
+
+    const getCurrentSeqNumber = () => {
+      const n = parseInt(localStorage.getItem('tech_print_last_seq') || '2420', 10);
+      if (isNaN(n)) localStorage.setItem('tech_print_last_seq', 2420);
+      return isNaN(n) ? 2420 : n;
+    };
+
+    async function syncSerialFromGoogleSheet() {
+      const badge = document.getElementById('syncStatusBadge');
+      if (badge) {
+        badge.textContent = "🔄 শিট থেকে সিরিয়াল সিঙ্ক হচ্ছে...";
+        badge.className = "text-[11px] font-semibold text-amber-600";
+      }
+      try {
+        if (!GOOGLE_SHEET_URL) return;
+        const res = await fetch(`${GOOGLE_SHEET_URL}?t=${Date.now()}`);
+        const data = await res.json();
+        if (data && data.status === "success") {
+          const remoteLast = parseInt(data.lastSeq, 10) || 2420;
+          const nextSeq = parseInt(data.nextSeq, 10) || (remoteLast + 1);
+          localStorage.setItem('tech_print_last_seq', nextSeq);
+          document.getElementById('serialNoInput').value = `GS-Status-${nextSeq}`;
+          updateCard();
+          if (badge) {
+            badge.textContent = `✅ শিট সিঙ্কড (পরবর্তী: GS-Status-${nextSeq})`;
+            badge.className = "text-[11px] font-semibold text-emerald-600";
+          }
+        }
+      } catch (err) {
+        console.warn("Sheet serial sync fallback to local:", err);
+        if (badge) {
+          badge.textContent = "⚠️ অফলাইন মোড (লোকাল সিরিয়াল)";
+          badge.className = "text-[11px] font-semibold text-slate-500";
+        }
+      }
+    }
+
+    const startNewEntry = async (nextSeq = false) => {
+      let seq = getCurrentSeqNumber();
+      if (nextSeq) { seq += 1; localStorage.setItem('tech_print_last_seq', seq); }
+      document.getElementById('serialNoInput').value = `GS-Status-${seq}`;
+      ['nameInput', 'mobileInput', 'customerEmailInput', 'idValueInput', 'photoInput'].forEach(id => document.getElementById(id).value = '');
+      const t = new Date();
+      document.getElementById('submissionDateInput').value = `${t.getFullYear()}-${String(t.getMonth()+1).padStart(2,'0')}-${String(t.getDate()).padStart(2,'0')}`;
+      ['dobDay', 'dobMonth', 'dobYear', 'statusSelect'].forEach(id => document.getElementById(id).selectedIndex = 0);
+      setCustomerPhoto(defaultAvatar);
+      hasInteractedWithForm = false;
+      handleMainCategoryChange();
+      handleIdTypeChange();
+      updateCard();
+      refreshFormNotification(false);
+      await syncSerialFromGoogleSheet();
+    };
+
+    const resetCurrentForm = () => { startNewEntry(false); showToast("ফর্ম রিসেট করা হয়েছে!"); };
+
+    window.addEventListener('DOMContentLoaded', () => {
+      const dSel = document.getElementById('dobDay'), ySel = document.getElementById('dobYear');
+      for (let i = 1; i <= 31; i++) { const v = String(i).padStart(2, '0'); dSel.add(new Option(v, v)); }
+      for (let y = 2030; y >= 1920; y--) ySel.add(new Option(y, y));
+      startNewEntry(false);
+      fitPreview();
+    });
+
+    const handleMainCategoryChange = () => {
+      const cat = document.getElementById('mainCategorySelect').value;
+      const box = document.getElementById('subCategoryContainer');
+      box.innerHTML = '';
+      if (cat === "PLASTIC_CARD") {
+        box.innerHTML = `<input type="text" readonly value="প্লাস্টিক কার্ড" class="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 bg-slate-50 text-xs font-semibold text-slate-700">`;
+      } else if (cat === "CUSTOM") {
+        box.innerHTML = `<input type="text" id="subCategoryInput" placeholder="সেবার নাম লিখুন..." oninput="handleFormFieldChange()" class="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 text-xs font-semibold">`;
+      } else if (serviceData[cat]) {
+        const sel = document.createElement('select');
+        sel.id = 'subCategorySelect';
+        sel.className = 'w-full px-2.5 py-1.5 rounded-lg border border-slate-300 text-xs font-semibold bg-white';
+        sel.onchange = updateCard;
+        serviceData[cat].forEach(item => sel.add(new Option(item, item)));
+        box.appendChild(sel);
+      }
+      updateCard(); refreshFormNotification();
+    };
+
+    const handleSubCategoryChange = () => { updateCard(); refreshFormNotification(); };
+
+    const protectNidfnCursor = () => {
+      if (document.getElementById('idTypeSelect').value !== "NID From") return;
+      const inp = document.getElementById('idValueInput');
+      setTimeout(() => { if (inp.selectionStart < NIDFN_PREFIX.length) inp.setSelectionRange(NIDFN_PREFIX.length, inp.value.length); }, 0);
+    };
+
+    const handleIdKeyDown = (e) => {
+      if (document.getElementById('idTypeSelect').value !== "NID From") return;
+      const inp = document.getElementById('idValueInput');
+      if ((e.key === "Backspace" && inp.selectionStart <= NIDFN_PREFIX.length && inp.selectionEnd <= NIDFN_PREFIX.length) ||
+          (e.key === "Delete" && inp.selectionStart < NIDFN_PREFIX.length) ||
+          (e.key.length === 1 && !e.ctrlKey && !e.metaKey && inp.selectionStart < NIDFN_PREFIX.length)) {
+        e.preventDefault();
+        inp.setSelectionRange(NIDFN_PREFIX.length, inp.value.length);
+      }
+    };
+
+    const handleIdTypeChange = () => {
+      const type = document.getElementById('idTypeSelect').value;
+      const inp = document.getElementById('idValueInput');
+      const hint = document.getElementById('idRuleHint');
+      const rules = {
+        "National Id Card (Smart)": [10, "সর্বোচ্চ ১০ ডিজিট লিখুন...", "নিয়ম: Smart NID সর্বোচ্চ ১০ ডিজিট।"],
+        "National Id Card (Old)": [13, "সর্বোচ্চ ১৩ ডিজিট লিখুন...", "নিয়ম: Old NID সর্বোচ্চ ১৩ ডিজিট।"],
+        "Birth Registration No": [17, "সর্বোচ্চ ১৭ ডিজিট লিখুন...", "নিয়ম: Birth Registration No সর্বোচ্চ ১৭ ডিজিট।"],
+        "NID From": [15, "NIDFN এর পর ১০ ডিজিট লিখুন...", "নিয়ম: 'NIDFN' আগে থেকেই লেখা থাকবে, শুধু পরের ১০ ডিজিট বসানো যাবে।"]
+      };
+      const [maxLen, ph, txt] = rules[type];
+      inp.maxLength = maxLen; inp.placeholder = ph; hint.textContent = txt;
+      const digits = inp.value.replace(/^NIDFN/i, '').replace(/\D/g, '').slice(0, type === "NID From" ? 10 : maxLen);
+      inp.value = type === "NID From" ? `${NIDFN_PREFIX}${digits}` : digits;
+      updateCard(); refreshFormNotification();
+    };
+
+    const handleIdValueInput = () => {
+      hasInteractedWithForm = true;
+      const type = document.getElementById('idTypeSelect').value;
+      const inp = document.getElementById('idValueInput');
+      if (type === "NID From") {
+        let pos = inp.selectionStart;
+        const digits = inp.value.replace(/^NIDFN/i, '').replace(/\D/g, '').slice(0, 10);
+        const out = `${NIDFN_PREFIX}${digits}`;
+        inp.value = out;
+        pos = Math.max(NIDFN_PREFIX.length, Math.min(pos, out.length));
+        inp.setSelectionRange(pos, pos);
+      } else {
+        inp.value = inp.value.replace(/\D/g, '').slice(0, inp.maxLength);
+      }
+      updateCard(); refreshFormNotification();
+    };
+
+    const updateCard = () => {
+      const serial = document.getElementById('serialNoInput').value.trim() || `GS-Status-${getCurrentSeqNumber()}`;
+      const name = document.getElementById('nameInput').value.trim() || '—';
+      const status = document.getElementById('statusSelect').value;
+      const service = getServiceValue() || '—';
+      const idType = document.getElementById('idTypeSelect').value;
+      const idUpper = idType.toUpperCase();
+      const rawId = document.getElementById('idValueInput').value.trim();
+      const idVal = (idType === "NID From" && !rawId ? NIDFN_PREFIX : rawId) || '—';
+      const d = document.getElementById('dobDay').value, m = document.getElementById('dobMonth').value, y = document.getElementById('dobYear').value;
+      const dob = (d && m && y) ? `${d} ${m}, ${y}` : '—';
+      const tel = document.getElementById('telInput').value.trim();
+      const wa = document.getElementById('waInput').value.trim();
+      const shopEmail = document.getElementById('emailInput').value.trim();
+      const entryDate = formatEntryDate(document.getElementById('submissionDateInput').value);
+
+      document.getElementById('slipTopSerial').textContent = serial;
+      document.getElementById('slipStatus').textContent = status;
+      document.getElementById('slipDate').textContent = entryDate;
+      document.getElementById('slipName').textContent = name;
+      document.getElementById('slipService').textContent = service;
+      document.getElementById('slipIdLabel').textContent = `${idUpper} (ভোটার আইডি / নম্বর)`;
+      document.getElementById('slipIdValue').textContent = idVal;
+      document.getElementById('slipDob').textContent = dob;
+      document.getElementById('slipTel').textContent = tel || '—';
+      document.getElementById('slipWa').textContent = wa || '—';
+      document.getElementById('slipEmail').textContent = shopEmail || '—';
+
+      applyReadymadeBarcode(serial);
+      fitPreview();
+    };
+
+    const loadRecordBySerial = (key) => {
+      const saved = JSON.parse(localStorage.getItem('tech_print_sheet_data') || '[]');
+      const serialDecoded = decodeURIComponent(key);
+      const r = saved.find(item => item.serial === serialDecoded) || recordStore[key];
+      if (!r) return;
+
+      document.getElementById('serialNoInput').value = r.serial || '';
+      document.getElementById('nameInput').value = r.name || '';
+      document.getElementById('mobileInput').value = r.mobile || '';
+      document.getElementById('customerEmailInput').value = r.email || '';
+      if (r.submissionDate) document.getElementById('submissionDateInput').value = r.submissionDate;
+      if (r.idType) document.getElementById('idTypeSelect').value = r.idType;
+      document.getElementById('idValueInput').value = r.idValue || '';
+      const m = (r.dob || '').match(/^(\d{2})\s+([A-Za-z]+),\s*(\d{4})$/);
+      if (m) { dobDay.value = m[1]; dobMonth.value = m[2]; dobYear.value = m[3]; }
+      setServiceFieldsFromRecord(r);
+      setCustomerPhoto(r.photo);
+      hasInteractedWithForm = true;
+      handleIdTypeChange();
+      statusSelect.value = r.status || statusSelect.options[0].value;
+      updateCard();
+      refreshFormNotification();
+      ['adminSearchModal', 'statusUpdateModal'].forEach(id => document.getElementById(id).classList.add('hidden'));
+      showToast(`রেকর্ড লোড হয়েছে! (${r.status})`);
+    };
+
+    const updateRecordStatusDirect = (key, selectId, badgeId) => {
+      const serialDecoded = decodeURIComponent(key);
+      const newStatus = document.getElementById(selectId)?.value;
+      if (!newStatus) return;
+
+      const saved = JSON.parse(localStorage.getItem('tech_print_sheet_data') || '[]');
+      const idx = saved.findIndex(item => item.serial === serialDecoded);
+      const targetRec = idx !== -1 ? saved[idx] : recordStore[key];
+      if (!targetRec) return;
+
+      targetRec.status = newStatus;
+      targetRec.date = new Date().toLocaleString('en-US');
+      recordStore[key] = targetRec;
+
+      if (idx !== -1) saved[idx] = targetRec;
+      else saved.push(targetRec);
+      localStorage.setItem('tech_print_sheet_data', JSON.stringify(saved));
+
+      const badgeEl = document.getElementById(badgeId);
+      if (badgeEl) badgeEl.textContent = newStatus;
+
+      if (document.getElementById('serialNoInput').value.trim() === serialDecoded) {
+        statusSelect.value = newStatus;
+        updateCard();
+      }
+
+      if (GOOGLE_SHEET_URL) {
+        const { photo, ...sheetPayload } = targetRec;
+        fetch(GOOGLE_SHEET_URL, {
+          method: "POST",
+          mode: "no-cors",
+          keepalive: true,
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(sheetPayload)
+        }).catch(err => console.error(err));
+      }
+
+      showToast(`স্ট্যাটাস আপডেট হয়েছে: ${newStatus}`);
+    };
+
+    const renderRecordActionCard = (r, prefix) => {
+      const k = encodeURIComponent(r.serial);
+      recordStore[k] = r;
+      const selId = `${prefix}_sel_${r.serial.replace(/[^a-zA-Z0-9]/g, '_')}`;
+      const badgeId = `${prefix}_badge_${r.serial.replace(/[^a-zA-Z0-9]/g, '_')}`;
+      const orderedWork = r.service || r.serviceCategory || 'তথ্য নেই';
+      const optionsHtml = STATUS_OPTIONS.map(st =>
+        `<option value="${st}" ${r.status === st ? 'selected' : ''}>${st}</option>`
+      ).join('');
+
+      return `
+        <div class="bg-white border border-slate-200 p-3 rounded-xl mt-2 space-y-2 shadow-xs">
+          <div class="flex flex-wrap items-center justify-between gap-1">
+            <span class="font-bold text-rose-900 font-mono">${r.serial}</span>
+            <span id="${badgeId}" class="px-2 py-0.5 rounded bg-emerald-100 text-emerald-900 font-bold text-[11px]">${r.status || '—'}</span>
+          </div>
+          <div class="text-slate-700"><b>গ্রাহক:</b> ${r.name || '—'} &nbsp;|&nbsp; <b>মোবাইল:</b> ${r.mobile || '—'}</div>
+          <div class="bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5 text-amber-950">
+            <b>১ম অর্ডারকৃত কাজ:</b> ${orderedWork}
+          </div>
+          <div class="flex flex-wrap items-center gap-2 pt-1">
+            <select id="${selId}" class="flex-1 min-w-[150px] px-2 py-1 rounded-lg border border-slate-300 text-xs font-semibold bg-white">
+              ${optionsHtml}
+            </select>
+            <button type="button" onclick="updateRecordStatusDirect('${k}', '${selId}', '${badgeId}')" class="bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1 rounded-lg text-xs font-semibold">স্ট্যাটাস আপডেট</button>
+            <button type="button" onclick="loadRecordBySerial('${k}')" class="bg-blue-600 hover:bg-blue-700 text-white px-2.5 py-1 rounded-lg text-xs font-semibold">স্লিপে লোড</button>
+          </div>
+        </div>
+      `;
+    };
+
+    const performGeneralSearch = () => {
+      const nid = searchNidInput.value.trim(), mob = searchMobileInput.value.trim(), mail = searchEmailInput.value.trim().toLowerCase();
+      if (!nid && !mob && !mail) { generalSearchResult.innerHTML = '<span class="text-rose-600">এনআইডি, মোবাইল বা ইমেইল দিন।</span>'; return; }
+      const list = JSON.parse(localStorage.getItem('tech_print_sheet_data') || '[]').filter(i =>
+        (nid && i.idValue?.includes(nid)) || (mob && i.mobile?.includes(mob)) || (mail && i.email?.toLowerCase().includes(mail))
+      );
+      if (!list.length) { generalSearchResult.innerHTML = '<span class="text-rose-600">কোনো তথ্য পাওয়া যায়নি।</span>'; return; }
+      generalSearchResult.innerHTML = list.map(r => renderRecordActionCard(r, 'gen')).join('');
+    };
+
+    const performGsStatusSearch = () => {
+      const num = statusNumInput.value.trim();
+      if (!num) { statusSearchResult.innerHTML = '<span class="text-rose-600">সংখ্যা লিখুন।</span>'; return; }
+      const target = `GS-Status-${num}`.toLowerCase();
+      const found = JSON.parse(localStorage.getItem('tech_print_sheet_data') || '[]').find(i => i.serial.toLowerCase() === target);
+      if (!found) { statusSearchResult.innerHTML = `<span class="text-rose-600">"GS-Status-${num}" রেকর্ড নেই।</span>`; return; }
+      statusSearchResult.innerHTML = renderRecordActionCard(found, 'gs');
+    };
+
+    function saveToGoogleSheet() {
+      if (!validateRequiredFields(true)) return;
+      const badge = document.getElementById('syncStatusBadge');
+      const d = dobDay.value, m = dobMonth.value, y = dobYear.value;
+      const currentSerial = serialNoInput.value.trim() || `GS-Status-${getCurrentSeqNumber()}`;
+      const sheetRecord = {
+        serial: currentSerial,
+        submissionDate: submissionDateInput.value,
+        name: nameInput.value,
+        mobile: mobileInput.value,
+        email: customerEmailInput.value,
+        serviceCategory: mainCategorySelect.options[mainCategorySelect.selectedIndex].text,
+        service: getServiceValue(),
+        idType: idTypeSelect.value,
+        idValue: idValueInput.value,
+        dob: (d && m && y) ? `${d} ${m}, ${y}` : '',
+        status: statusSelect.value,
+        date: new Date().toLocaleString('en-US')
+      };
+
+      const seqMatch = currentSerial.match(/GS-Status-(\d+)/i);
+      if (seqMatch) {
+        localStorage.setItem('tech_print_last_seq', parseInt(seqMatch[1], 10));
+      }
+
+      const saved = JSON.parse(localStorage.getItem('tech_print_sheet_data') || '[]');
+      const localRec = { ...sheetRecord, photo: slipPhoto.src };
+      const idx = saved.findIndex(r => r.serial === sheetRecord.serial);
+      if (idx !== -1) saved[idx] = localRec; else saved.push(localRec);
+      localStorage.setItem('tech_print_sheet_data', JSON.stringify(saved));
+
+      showToast("সংরক্ষিত হয়েছে!");
+      if (badge) {
+        badge.textContent = "⏳ শিটে পাঠানো হচ্ছে...";
+        badge.className = "text-[11px] font-semibold text-indigo-600";
+      }
+
+      if (GOOGLE_SHEET_URL) {
+        fetch(GOOGLE_SHEET_URL, {
+          method: "POST",
+          mode: "no-cors",
+          keepalive: true,
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(sheetRecord)
+        })
+        .then(() => {
+          if (badge) {
+            badge.textContent = `✅ শিটে সেভ হয়েছে (${currentSerial})`;
+            badge.className = "text-[11px] font-semibold text-emerald-600";
+          }
+        })
+        .catch(err => {
+          console.error(err);
+          showToast("শিটে পাঠাতে সমস্যা হয়েছে!", true);
+          if (badge) {
+            badge.textContent = "⚠️ শিটে সেভ ব্যর্থ হয়েছে";
+            badge.className = "text-[11px] font-semibold text-rose-600";
+          }
+        });
+      }
+    }
+
+    const initCropperModal = (e) => {
+      const f = e.target.files[0]; if (!f) return;
+      const r = new FileReader();
+      r.onload = ev => {
+        imageToCrop.src = ev.target.result;
+        cropperModal.classList.remove('hidden');
+        if (cropper) cropper.destroy();
+        cropper = new Cropper(imageToCrop, { aspectRatio: 35 / 45, viewMode: 1, autoCropArea: 0.9, responsive: true });
+      };
+      r.readAsDataURL(f);
+    };
+    const getCroppedImage = () => { if (!cropper) return; setCustomerPhoto(cropper.getCroppedCanvas({ width: 700, height: 900 }).toDataURL('image/png')); closeCropperModal(); };
+    const closeCropperModal = () => { cropperModal.classList.add('hidden'); if (cropper) { cropper.destroy(); cropper = null; } };
+    const resetPhoto = () => setCustomerPhoto(defaultAvatar);
+
+    const fitPreview = () => {
+      const w = document.getElementById('preview-wrapper');
+      const s = document.getElementById('scale-container');
+      const slip = document.getElementById('customer-slip-canvas');
+      if (!w || !s || !slip) return;
+      const slipH = slip.offsetHeight || 1180;
+      const aw = w.clientWidth - 16;
+      const ah = w.clientHeight > 60 ? w.clientHeight - 16 : slipH;
+      const scale = Math.min(aw / 680, window.innerWidth >= 1024 ? ah / slipH : 1, 0.85);
+      s.style.transform = `scale(${scale})`;
+      w.style.height = window.innerWidth < 1024 ? `${slipH * scale + 16}px` : '';
+    };
+    window.addEventListener('resize', fitPreview);
+
+    async function downloadCustomerSlip() {
+      if (!validateRequiredFields(true)) return;
+      const btn = document.getElementById('downloadSlipBtn');
+      const s = document.getElementById('scale-container');
+      const prevTransform = s.style.transform;
+      btn.disabled = true;
+      try {
+        updateCard();
+        await document.fonts.ready;
+        await Promise.all([
+          new Promise(res => slipPhoto.complete ? res() : (slipPhoto.onload = slipPhoto.onerror = res)),
+          new Promise(res => slipBarcodeImg.complete ? res() : (slipBarcodeImg.onload = slipBarcodeImg.onerror = res))
+        ]);
+        s.style.transform = 'scale(1)';
+        const canvas = await html2canvas(document.getElementById('customer-slip-canvas'), {
+          scale: 2,
+          useCORS: true,
+          allowTaint: true,
+          backgroundColor: '#ffffff'
+        });
+        s.style.transform = prevTransform;
+        const a = document.createElement('a');
+        const ser = (serialNoInput.value || 'GS-Status').trim();
+        const nm = (nameInput.value || 'Customer').trim().replace(/\s+/g, '_');
+        a.download = `Customer_Slip_${ser}_${nm}.png`;
+        a.href = canvas.toDataURL('image/png', 1.0);
+        a.click();
+        showToast("কাস্টমার স্লিপ PNG ডাউনলোড হয়েছে!");
+      } catch (e) {
+        s.style.transform = prevTransform;
+        console.error(e);
+        showToast("স্লিপ ডাউনলোড করতে সমস্যা হয়েছে!", true);
+      } finally {
+        btn.disabled = false;
+      }
+    }
+  </script>
+</body>
+</html>
