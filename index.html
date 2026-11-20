@@ -310,7 +310,7 @@
       </div>
       <div class="flex items-center border rounded-xl px-3 py-2">
         <span class="font-bold text-rose-900 font-mono text-sm">GS-Status-</span>
-        <input type="text" id="statusNumInput" placeholder="যেমন: 2420" class="w-full pl-1 text-sm font-mono font-bold focus:outline-none">
+        <input type="text" id="statusNumInput" placeholder="যেমন: 2421" class="w-full pl-1 text-sm font-mono font-bold focus:outline-none">
       </div>
       <button type="button" onclick="performGsStatusSearch()" class="bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 rounded-xl text-xs">আবেদন খুঁজুন</button>
       <div id="statusSearchResult" class="bg-slate-50 border rounded-xl p-3 text-xs max-h-60 overflow-y-auto">ফলাফল এখানে প্রদর্শিত হবে...</div>
@@ -356,7 +356,7 @@
       "BIRTH": ["নতুন জন্ম নিবন্ধন আবেদন", "জন্ম নিবন্ধন সংশোধন", "জন্ম সনদ অনলাইন তথ্য সংযোজন"],
       "TAX": ["নতুন ই-টিন সার্টিফিকেট (TIN)", "রিটার্ন সাবমিশন ও সার্টিফিকেট", "ভ্যাট সার্টিফিকেট আবেদন"]
     };
-    let cropper = null, recordStore = {}, hasInteractedWithForm = false;
+    let cropper = null, recordStore = {}, sheetRecordsCache = [], hasInteractedWithForm = false;
 
     const showToast = (msg, isError = false) => {
       const t = document.getElementById('toastNotification');
@@ -367,6 +367,31 @@
     };
 
     const toggleModal = (id) => document.getElementById(id).classList.toggle('hidden');
+
+    const isValidCustomerRecord = (r) => {
+      const s = String(r?.serial || '').trim();
+      if (!s) return false;
+      if (/^GS-Status-\d+$/i.test(s)) return true;
+      return Boolean(String(r?.name || '').trim() || String(r?.mobile || '').trim() || String(r?.idValue || '').trim());
+    };
+
+    const cacheSheetRecords = (records) => {
+      if (!Array.isArray(records)) return;
+      const cleaned = records.filter(isValidCustomerRecord);
+      sheetRecordsCache = cleaned;
+
+      const existing = JSON.parse(localStorage.getItem('tech_print_sheet_data') || '[]');
+      const photoMap = {};
+      existing.forEach(item => {
+        if (item?.serial && item?.photo) photoMap[item.serial] = item.photo;
+      });
+
+      const merged = cleaned.map(rec => ({
+        ...rec,
+        photo: photoMap[rec.serial] || defaultAvatar
+      }));
+      localStorage.setItem('tech_print_sheet_data', JSON.stringify(merged));
+    };
 
     const setCustomerPhoto = (src) => {
       const imgSrc = src || defaultAvatar;
@@ -459,9 +484,14 @@
 
     const formatEntryDate = (raw) => {
       if (raw) {
-        const [y, m, d] = raw.split('-').map(Number);
-        const dt = new Date(y, m - 1, d);
-        if (!isNaN(dt)) return dt.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+        const str = String(raw).trim();
+        if (/^\d{4}-\d{2}-\d{2}$/.test(str)) {
+          const [y, m, d] = str.split('-').map(Number);
+          const dt = new Date(y, m - 1, d);
+          if (!isNaN(dt)) return dt.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+        }
+        const dt2 = new Date(str);
+        if (!isNaN(dt2.getTime())) return dt2.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
       }
       return new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
     };
@@ -479,7 +509,7 @@
         badge.className = "text-[11px] font-semibold text-amber-600";
       }
       try {
-        if (!GOOGLE_SHEET_URL) return;
+        if (!GOOGLE_SHEET_URL) return [];
         const res = await fetch(`${GOOGLE_SHEET_URL}?t=${Date.now()}`);
         const data = await res.json();
         if (data && data.status === "success") {
@@ -487,11 +517,15 @@
           const nextSeq = parseInt(data.nextSeq, 10) || (remoteLast + 1);
           localStorage.setItem('tech_print_last_seq', nextSeq);
           document.getElementById('serialNoInput').value = `GS-Status-${nextSeq}`;
+          if (Array.isArray(data.records)) {
+            cacheSheetRecords(data.records);
+          }
           updateCard();
           if (badge) {
             badge.textContent = `✅ শিট সিঙ্কড (পরবর্তী: GS-Status-${nextSeq})`;
             badge.className = "text-[11px] font-semibold text-emerald-600";
           }
+          return sheetRecordsCache;
         }
       } catch (err) {
         console.warn("Sheet serial sync fallback to local:", err);
@@ -500,6 +534,7 @@
           badge.className = "text-[11px] font-semibold text-slate-500";
         }
       }
+      return JSON.parse(localStorage.getItem('tech_print_sheet_data') || '[]');
     }
 
     const startNewEntry = async (nextSeq = false) => {
@@ -633,6 +668,34 @@
       fitPreview();
     };
 
+    const parseToInputDate = (raw) => {
+      if (!raw) return '';
+      const str = String(raw).trim();
+      if (/^\d{4}-\d{2}-\d{2}$/.test(str)) return str;
+      const dt = new Date(str);
+      if (isNaN(dt.getTime())) return '';
+      return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
+    };
+
+    const applyDobToForm = (rawDob) => {
+      if (!rawDob) return;
+      const str = String(rawDob).trim();
+      const m = str.match(/^(\d{1,2})\s+([A-Za-z]+),?\s*(\d{4})$/);
+      if (m) {
+        dobDay.value = String(m[1]).padStart(2, '0');
+        dobMonth.value = m[2];
+        dobYear.value = m[3];
+        return;
+      }
+      const dt = new Date(str);
+      if (!isNaN(dt.getTime())) {
+        const months = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+        dobDay.value = String(dt.getDate()).padStart(2, '0');
+        dobMonth.value = months[dt.getMonth()];
+        dobYear.value = String(dt.getFullYear());
+      }
+    };
+
     const loadRecordBySerial = (key) => {
       const saved = JSON.parse(localStorage.getItem('tech_print_sheet_data') || '[]');
       const serialDecoded = decodeURIComponent(key);
@@ -643,11 +706,13 @@
       document.getElementById('nameInput').value = r.name || '';
       document.getElementById('mobileInput').value = r.mobile || '';
       document.getElementById('customerEmailInput').value = r.email || '';
-      if (r.submissionDate) document.getElementById('submissionDateInput').value = r.submissionDate;
+
+      const isoDate = parseToInputDate(r.submissionDate);
+      if (isoDate) document.getElementById('submissionDateInput').value = isoDate;
+
       if (r.idType) document.getElementById('idTypeSelect').value = r.idType;
       document.getElementById('idValueInput').value = r.idValue || '';
-      const m = (r.dob || '').match(/^(\d{2})\s+([A-Za-z]+),\s*(\d{4})$/);
-      if (m) { dobDay.value = m[1]; dobMonth.value = m[2]; dobYear.value = m[3]; }
+      applyDobToForm(r.dob);
       setServiceFieldsFromRecord(r);
       setCustomerPhoto(r.photo);
       hasInteractedWithForm = true;
@@ -730,21 +795,42 @@
       `;
     };
 
-    const performGeneralSearch = () => {
+    const performGeneralSearch = async () => {
       const nid = searchNidInput.value.trim(), mob = searchMobileInput.value.trim(), mail = searchEmailInput.value.trim().toLowerCase();
       if (!nid && !mob && !mail) { generalSearchResult.innerHTML = '<span class="text-rose-600">এনআইডি, মোবাইল বা ইমেইল দিন।</span>'; return; }
-      const list = JSON.parse(localStorage.getItem('tech_print_sheet_data') || '[]').filter(i =>
-        (nid && i.idValue?.includes(nid)) || (mob && i.mobile?.includes(mob)) || (mail && i.email?.toLowerCase().includes(mail))
-      );
+      generalSearchResult.innerHTML = '<span class="text-slate-500">শিট থেকে তথ্য খোঁজা হচ্ছে...</span>';
+
+      let allRecs = JSON.parse(localStorage.getItem('tech_print_sheet_data') || '[]');
+      const matchFn = (i) =>
+        isValidCustomerRecord(i) &&
+        ((nid && String(i.idValue || '').includes(nid)) ||
+         (mob && String(i.mobile || '').includes(mob)) ||
+         (mail && String(i.email || '').toLowerCase().includes(mail)));
+
+      let list = allRecs.filter(matchFn);
+      if (!list.length && GOOGLE_SHEET_URL) {
+        allRecs = await syncSerialFromGoogleSheet();
+        list = allRecs.filter(matchFn);
+      }
+
       if (!list.length) { generalSearchResult.innerHTML = '<span class="text-rose-600">কোনো তথ্য পাওয়া যায়নি।</span>'; return; }
       generalSearchResult.innerHTML = list.map(r => renderRecordActionCard(r, 'gen')).join('');
     };
 
-    const performGsStatusSearch = () => {
+    const performGsStatusSearch = async () => {
       const num = statusNumInput.value.trim();
       if (!num) { statusSearchResult.innerHTML = '<span class="text-rose-600">সংখ্যা লিখুন।</span>'; return; }
+      statusSearchResult.innerHTML = '<span class="text-slate-500">শিট থেকে রেকর্ড খোঁজা হচ্ছে...</span>';
+
       const target = `GS-Status-${num}`.toLowerCase();
-      const found = JSON.parse(localStorage.getItem('tech_print_sheet_data') || '[]').find(i => i.serial.toLowerCase() === target);
+      let allRecs = JSON.parse(localStorage.getItem('tech_print_sheet_data') || '[]');
+      let found = allRecs.find(i => String(i.serial || '').toLowerCase() === target);
+
+      if (!found && GOOGLE_SHEET_URL) {
+        allRecs = await syncSerialFromGoogleSheet();
+        found = allRecs.find(i => String(i.serial || '').toLowerCase() === target);
+      }
+
       if (!found) { statusSearchResult.innerHTML = `<span class="text-rose-600">"GS-Status-${num}" রেকর্ড নেই।</span>`; return; }
       statusSearchResult.innerHTML = renderRecordActionCard(found, 'gs');
     };
